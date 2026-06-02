@@ -1,0 +1,22 @@
+name = "finance-telegram-bot"
+main = "src/index.ts"
+compatibility_date = "2026-06-01"
+
+# KV 存储
+# 部署前请在 Cloudflare Dashboard 创建 KV namespace，将 ID 替换到下方
+# wrangler kv:namespace create "KV"  # 生产环境
+# wrangler kv:namespace create "KV" --preview  # 预览环境
+kv_namespaces = [
+  { binding = "NUMBERS", id = "3a3998867cdb483cbca9cbf84feb0b6a", preview_id = "97cd17dc4ece422088bfa21de96be1c2" }
+]
+
+# Telegram Bot Token（通过 wrangler secret 设置，不要硬编码）
+# wrangler secret put TELEGRAM_BOT_TOKEN
+
+# 允许使用的 TG Chat ID，多个用逗号分隔（通过 wrangler secret 设置）
+# 例: wrangler secret put ALLOWED_CHAT_IDS  # 输入 "12345678,87654321"
+# wrangler secret put ALLOWED_CHAT_IDS
+
+# 环境变量说明
+[vars]
+# 无额外 vars，TELEGRAM_BOT_TOKEN 通过 secret 注入
