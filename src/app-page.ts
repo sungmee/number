@@ -118,7 +118,15 @@ document.querySelectorAll('.tab:not(.refresh-tab)').forEach(btn => {
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
-    setTimeout(() => resizeCharts(), 100);
+    // 切换到月度汇总时重新渲染（图表初始化时面板隐藏，宽度为 0）
+    if (btn.dataset.tab === 'summary' && allData) {
+      const picker = document.getElementById('month-picker');
+      const activeBtn = picker.querySelector('.month-btn.active');
+      const idx = activeBtn ? Array.from(picker.children).indexOf(activeBtn) : allData.allMonths.length - 1;
+      setTimeout(() => updateSummaryChart(idx), 50);
+    } else {
+      setTimeout(() => resizeCharts(), 100);
+    }
   });
 });
 
@@ -133,13 +141,7 @@ function forceRefresh() {
   loadData();
 }
 
-// 下拉刷新检测
-let touchStartY = 0;
-document.addEventListener('touchstart', e => { touchStartY = e.touches[0].clientY; }, { passive: true });
-document.addEventListener('touchend', e => {
-  const dy = e.changedTouches[0].clientY - touchStartY;
-  if (dy > 100) forceRefresh(); // 下拉超过 100px 触发
-}, { passive: true });
+// 下拉刷新已移除（TG 下拉会关闭 Mini App），请点击 ↻ 按钮刷新
 
 async function doLogin() {
   const initData = TG?.initData;
@@ -194,7 +196,7 @@ function showLastUpdate() {
     if (ts) {
       const d = new Date(Number(ts));
       const s = d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
-      bar.textContent = '上次更新 ' + s + '  下拉或点击 ↻ 刷新';
+      bar.textContent = '上次更新 ' + s + '  点击 ↻ 刷新';
       bar.style.display = 'block';
     }
   } catch {}
@@ -315,14 +317,19 @@ function renderTrend() {
     data: c.data,
   }));
 
+  const nCh = allData.channels.filter(c => c.data.some(v => v > 0)).length;
+  const legendH = Math.min(40 + Math.ceil(nCh / 3) * 16, 200);
+  document.getElementById('trend-chart').style.height = Math.max(420, 260 + legendH) + 'px';
+
   chart.setOption({
     ...chartTheme(),
     tooltip: { trigger: 'axis', valueFormatter: v => fmt(v), ...tooltipTheme() },
     legend: {
-      type: 'scroll', bottom: 0,
+      type: 'plain', bottom: 0,
       textStyle: { fontSize: 11, color: COL_TEXT2 },
+      icon: 'circle', itemWidth: 8, itemHeight: 8,
     },
-    grid: { left: 60, right: 16, bottom: 120, top: 16 },
+    grid: { left: 60, right: 16, bottom: legendH, top: 16 },
     xAxis: {
       type: 'category', data: months,
       axisLine: { lineStyle: { color: COL_BORDER } },
@@ -372,7 +379,8 @@ function renderSummary() {
     picker.appendChild(btn);
   });
 
-  updateSummaryChart(activeIdx);
+  // 不在这里创建图表（面板隐藏时宽度为 0），等切换到标签时再创建
+  window._summaryMonthIdx = activeIdx;
 }
 
 function updateSummaryChart(idx) {
@@ -390,18 +398,38 @@ function updateSummaryChart(idx) {
     + '<div class="card"><div class="label">渠道数</div><div class="value">' + items.length + '</div><div class="sub">活跃渠道</div></div>';
   document.getElementById('summary-cards').innerHTML = cardsHtml;
 
-  // 柱状图
-  const chart = echarts.init(document.getElementById('summary-chart'));
+  // 柱状图（渠道多时改用横向，标签在左侧）
+  const el = document.getElementById('summary-chart');
+  const n = items.length;
+  const isMany = n > 8;
+  // 横向图时抬高容器，保证每行有足够空间
+  if (isMany) el.style.height = Math.max(420, n * 32) + 'px';
+  else el.style.height = '420px';
+  // 每次都先销毁旧实例再创建，保证拿到正确宽度
+  if (charts.summary) try { charts.summary.dispose(); } catch {}
+  const chart = echarts.init(el);
+  charts.summary = chart;
   chart.setOption({
     ...chartTheme(),
     tooltip: { trigger: 'axis', valueFormatter: v => fmt(v), ...tooltipTheme() },
-    grid: { left: 70, right: 20, top: 10, bottom: 30 },
-    xAxis: {
+    grid: { left: isMany ? 90 : 80, right: 20, top: 8, bottom: isMany ? 30 : 40 },
+    xAxis: isMany ? {
+      type: 'value',
+      axisLabel: {
+        color: COL_TEXT2, fontSize: 9,
+        formatter: v => v >= 10000 ? (v/10000).toFixed(0) + '万' : v,
+      },
+      splitLine: { lineStyle: { color: COL_BORDER, type: 'dashed' } },
+    } : {
       type: 'category', data: items.map(x => x.name),
-      axisLabel: { color: COL_TEXT2, fontSize: 10, interval: 0, rotate: items.length > 6 ? 35 : 0 },
+      axisLabel: { color: COL_TEXT2, fontSize: 10, interval: 0, rotate: 35 },
       axisLine: { lineStyle: { color: COL_BORDER } },
     },
-    yAxis: {
+    yAxis: isMany ? {
+      type: 'category', data: items.map(x => x.name),
+      axisLabel: { color: COL_TEXT2, fontSize: 10 },
+      axisLine: { lineStyle: { color: COL_BORDER } },
+    } : {
       type: 'value', min: 0,
       axisLabel: {
         color: COL_TEXT2, fontSize: 10,
@@ -413,9 +441,8 @@ function updateSummaryChart(idx) {
       type: 'bar',
       data: items.map((x, i) => ({
         value: x.value,
-        itemStyle: { color: COLORS[x.idx % COLORS.length], borderRadius: [4, 4, 0, 0] },
+        itemStyle: { color: COLORS[x.idx % COLORS.length], borderRadius: isMany ? [0, 4, 4, 0] : [4, 4, 0, 0] },
       })),
-      barMaxWidth: 36,
       animationDuration: 500,
       animationEasing: 'cubicOut',
     }],
@@ -428,14 +455,19 @@ function renderAllSummary() {
   const chart = echarts.init(document.getElementById('all-chart'));
   charts.all = chart;
 
+  const nCh2 = allData.channels.filter(c => c.data.some(v => v > 0)).length;
+  const legendH2 = Math.min(40 + Math.ceil(nCh2 / 3) * 16, 200);
+  document.getElementById('all-chart').style.height = Math.max(500, 300 + legendH2) + 'px';
+
   chart.setOption({
     ...chartTheme(),
     tooltip: { trigger: 'axis', valueFormatter: v => fmt(v), ...tooltipTheme() },
     legend: {
-      type: 'scroll', bottom: 0,
+      type: 'plain', bottom: 0,
       textStyle: { fontSize: 11, color: COL_TEXT2 },
+      icon: 'circle', itemWidth: 8, itemHeight: 8,
     },
-    grid: { left: 60, right: 16, bottom: 120, top: 16 },
+    grid: { left: 60, right: 16, bottom: legendH2, top: 16 },
     xAxis: {
       type: 'category', data: months,
       axisLine: { lineStyle: { color: COL_BORDER } },
