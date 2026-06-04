@@ -469,21 +469,33 @@ async function handleTextMessage(chatId: number, msgId: number, text: string, en
 function parseAmountInput(input: string): { amount: number; month: string } | null {
   const trimmed = input.trim();
 
+  // 先尝试匹配纯数字（只有金额，使用当前月份）
+  // 必须放在「金额 月份」格式之前，否则对于 "90000" 这样的纯数字，
+  // 前一个正则可能通过回溯匹配成 amount=9000 month=0，然后月份校验失败返回 null
+  const patternPure = trimmed.match(/^(\d+(?:\.\d{1,2})?)$/);
+  if (patternPure) {
+    const amount = parseFloat(patternPure[1]);
+    if (amount <= 0) return null;
+    const now = new Date();
+    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    return { amount, month };
+  }
+
   // 尝试匹配: "金额 月份" 或 "金额 年月份"
-  const pattern1 = trimmed.match(
+  const patternWithMonth = trimmed.match(
     /^(\d+(?:\.\d{1,2})?)\s*(?:(\d{4})\s*年?)?\s*(\d{1,2})\s*月?$/,
   );
-  if (pattern1) {
-    const amount = parseFloat(pattern1[1]);
+  if (patternWithMonth) {
+    const amount = parseFloat(patternWithMonth[1]);
     const now = new Date();
     const curYear = now.getFullYear();
     const curMonth = now.getMonth() + 1;
-    const specifiedMonth = parseInt(pattern1[3]);
+    const specifiedMonth = parseInt(patternWithMonth[3]);
 
     let year: string;
-    if (pattern1[2]) {
+    if (patternWithMonth[2]) {
       // 用户指定了年份，直接使用
-      year = pattern1[2];
+      year = patternWithMonth[2];
     } else if (specifiedMonth > curMonth) {
       // 没写年份，但月份大于当前月 → 上一年的月份
       year = String(curYear - 1);
@@ -492,19 +504,9 @@ function parseAmountInput(input: string): { amount: number; month: string } | nu
       year = String(curYear);
     }
 
-    const month = pattern1[3].padStart(2, '0');
+    const month = patternWithMonth[3].padStart(2, '0');
     if (amount <= 0 || specifiedMonth < 1 || specifiedMonth > 12) return null;
     return { amount, month: `${year}-${month}` };
-  }
-
-  // 尝试匹配纯数字（只有金额，使用当前月份）
-  const pattern2 = trimmed.match(/^(\d+(?:\.\d{1,2})?)$/);
-  if (pattern2) {
-    const amount = parseFloat(pattern2[1]);
-    if (amount <= 0) return null;
-    const now = new Date();
-    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    return { amount, month };
   }
 
   return null;
